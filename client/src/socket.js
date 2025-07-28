@@ -1,8 +1,10 @@
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:3000", {
-    withCredentials: true,
-    transports: ["websocket", "polling"],
+const CLIENT = import.meta.env.VITE_SERVER_URL;
+
+const socket = io(CLIENT, {
+  withCredentials: true,
+  transports: ["websocket", "polling"],
 });
 
 export default socket; 

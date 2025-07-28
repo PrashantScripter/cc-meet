@@ -4,7 +4,7 @@ import { useParams } from "react-router-dom";
 import * as mediasoupClient from "mediasoup-client";
 import Controls from "../components/MediaControl";
 import VideoGrid from "../components/VideoGrid";
-import socket from "../socket";
+import socket from "../socket.js";
 
 export default React.memo(function MeetingRoom() {
   const { roomId } = useParams();

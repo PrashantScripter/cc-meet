@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const { Server } = require("socket.io");
 const cors = require("cors");
@@ -8,11 +9,15 @@ const app = express();
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: `${process.env.PORT}`,
     methods: ["GET", "POST"],
     credentials: true,
   })
 );
+
+app.get('/', (req, res) => {
+  res.send("Working..");
+})
 
 const server = app.listen(3000, () =>
   console.log("Server running on port 3000")
@@ -20,11 +25,13 @@ const server = app.listen(3000, () =>
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: `${process.env.PORT}`,
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
+
+
 
 let worker;
 (async () => {
@@ -36,7 +43,6 @@ let worker;
       console.log("Client connected:", socket.id);
       socketHandler(socket, worker, io);
     });
-
   } catch (err) {
     console.error("Error initializing Mediasoup Worker:", err);
     process.exit(1);
