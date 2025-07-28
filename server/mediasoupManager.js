@@ -1,3 +1,4 @@
+// mediasoupManager.js
 const mediasoup = require("mediasoup");
 
 const mediaCodecs = [
@@ -17,7 +18,7 @@ const mediaCodecs = [
 
 async function createWorker() {
   return await mediasoup.createWorker({
-    logLevel: "warn",
+    logLevel: "debug", // Changed from "warn" to "debug" for detailed logs
     rtcMinPort: 10000,
     rtcMaxPort: 10100,
   });

@@ -2,8 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 function Controls({ producers }) {
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [videoEnabled, setVideoEnabled] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -14,14 +14,20 @@ function Controls({ producers }) {
 
   const toggleAudio = () => {
     producers.forEach((producer) => {
-      if (producer.kind === "audio") producer.track.enabled = !audioEnabled;
+      if (producer.kind === "audio") {
+        producer.track.enabled = !audioEnabled;
+        console.log("[toggleAudio] Audio track enabled:", producer.track.enabled);
+      }
     });
     setAudioEnabled(!audioEnabled);
   };
 
   const toggleVideo = () => {
     producers.forEach((producer) => {
-      if (producer.kind === "video") producer.track.enabled = !videoEnabled;
+      if (producer.kind === "video") {
+        producer.track.enabled = !videoEnabled;
+        console.log("[toggleVideo] Video track enabled:", producer.track.enabled);
+      }
     });
     setVideoEnabled(!videoEnabled);
   };
@@ -56,3 +62,4 @@ function Controls({ producers }) {
 }
 
 export default Controls;
+

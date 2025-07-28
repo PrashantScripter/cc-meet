@@ -135,9 +135,16 @@ export default React.memo(function MeetingRoom() {
 
     const initializeRoom = async () => {
       try {
-        const response = await new Promise((resolve) =>
-          socket.emit("joinRoom", { roomId }, (data) => resolve(data))
-        );
+        const response = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error("joinRoom timeout")),
+            10000
+          );
+          socket.emit("joinRoom", { roomId }, (data) => {
+            clearTimeout(timeout);
+            resolve(data);
+          });
+        });
         if (!mounted || !response || response.error) {
           console.error(
             "[joinRoom] Error:",
@@ -244,10 +251,50 @@ export default React.memo(function MeetingRoom() {
     (async () => {
       if (sendTransport.closed) return;
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
+        // Create a synthetic audio stream (440Hz sine wave)
+        localStream = new MediaStream();
+        const audioContext = new AudioContext();
+        const oscillator = audioContext.createOscillator();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+        oscillator.start();
+        const destination = audioContext.createMediaStreamDestination();
+        oscillator.connect(destination);
+        const audioTrack = destination.stream.getAudioTracks()[0];
+        localStream.addTrack(audioTrack);
+        console.log("[localStream] Added synthetic audio track:", {
+          id: audioTrack.id,
+          kind: audioTrack.kind,
+          enabled: audioTrack.enabled,
+          muted: audioTrack.muted,
+          readyState: audioTrack.readyState,
+          settings: audioTrack.getSettings(),
         });
+
+        // Add video track from camera
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        const videoTrack = videoStream.getVideoTracks()[0];
+        localStream.addTrack(videoTrack);
+        console.log("[localStream] Added video track:", {
+          id: videoTrack.id,
+          kind: videoTrack.kind,
+          enabled: videoTrack.enabled,
+          muted: videoTrack.muted,
+          readyState: videoTrack.readyState,
+          settings: videoTrack.getSettings(),
+        });
+
+        // Initially disable tracks (to match MediaControl.jsx behavior)
+        localStream.getTracks().forEach((track) => {
+          track.enabled = false;
+          console.log("[localStream] Track initialized:", {
+            kind: track.kind,
+            enabled: track.enabled,
+          });
+        });
+
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
           await localVideoRef.current
@@ -258,8 +305,20 @@ export default React.memo(function MeetingRoom() {
         }
 
         for (const track of localStream.getTracks()) {
-          if (sendTransport.closed) break;
-          const producer = await sendTransport.produce({ track });
+          let produceOptions = { track };
+          if (track.kind === "audio") {
+            produceOptions.codecOptions = { opusStereo: 1 };
+          }
+          const producer = await sendTransport.produce(produceOptions);
+          console.log("[localStream] Producer created:", {
+            id: producer.id,
+            kind: producer.kind,
+            track: {
+              id: track.id,
+              enabled: track.enabled,
+              readyState: track.readyState,
+            },
+          });
           setProducers((p) => [...p, producer]);
         }
       } catch (error) {
@@ -267,7 +326,11 @@ export default React.memo(function MeetingRoom() {
       }
     })();
 
-    return () => localStream?.getTracks().forEach((t) => t.stop());
+    return () => {
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+      }
+    };
   }, [sendTransport]);
 
   // Handle producer closed
