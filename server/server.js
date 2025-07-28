@@ -7,31 +7,31 @@ const socketHandler = require("./socketHandler");
 
 const app = express();
 
+// Use frontend URL for CORS (set FRONTEND_URL in .env)
 app.use(
   cors({
-    origin: `${process.env.PORT}`,
+    origin: process.env.FRONTEND_URL, // e.g., https://cc-meet-frontend.vercel.app
     methods: ["GET", "POST"],
     credentials: true,
   })
 );
 
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.send("Working..");
-})
+});
 
-const server = app.listen(3000, () =>
-  console.log("Server running on port 3000")
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, () =>
+  console.log(`Server running on port ${PORT}`)
 );
 
 const io = new Server(server, {
   cors: {
-    origin: `${process.env.PORT}`,
+    origin: process.env.FRONTEND_URL,
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
-
-
 
 let worker;
 (async () => {
@@ -49,7 +49,6 @@ let worker;
   }
 })();
 
-// Catch unhandled promise rejections
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled Promise Rejection:", err);
 });
