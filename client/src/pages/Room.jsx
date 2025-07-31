@@ -1,4 +1,3 @@
-// src/pages/MeetingRoom.jsx
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import * as mediasoupClient from "mediasoup-client";
@@ -10,7 +9,6 @@ export default React.memo(function MeetingRoom() {
   const [device, setDevice] = useState(null);
   const [audioContext, setAudioContext] = useState(null);
 
-  // Create AudioContext when device is ready
   useEffect(() => {
     if (device && !audioContext) {
       const ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -30,9 +28,8 @@ export default React.memo(function MeetingRoom() {
   const recvTransportRef = useRef();
   const deviceRef = useRef(null);
   const initializedRef = useRef(false);
-  const pendingRef = useRef([]); // Queued producers until we can consume
+  const pendingRef = useRef([]);
 
-  // Update socket ID on reconnect
   useEffect(() => {
     const updateId = () => setMySocketId(socket.id);
     socket.on("connect", updateId);
@@ -40,7 +37,6 @@ export default React.memo(function MeetingRoom() {
     return () => socket.off("connect", updateId);
   }, []);
 
-  // Consume pending producers
   const consumePending = useCallback(async () => {
     const currentDevice = deviceRef.current || device;
     if (!currentDevice || !recvTransportRef.current) {
@@ -103,7 +99,6 @@ export default React.memo(function MeetingRoom() {
               );
 
               try {
-                // Add a small delay to ensure transport is ready
                 await new Promise((r) => setTimeout(r, 100));
 
                 const consumer = await recvTransportRef.current.consume(params);
@@ -122,11 +117,9 @@ export default React.memo(function MeetingRoom() {
                     : null,
                 });
 
-                // Resume the consumer
                 await consumer.resume();
                 console.log("[consumePending] Consumer resumed");
 
-                // Wait a bit more for track to be ready
                 await new Promise((r) => setTimeout(r, 200));
 
                 if (consumer.track) {
@@ -178,7 +171,6 @@ export default React.memo(function MeetingRoom() {
     }
   }, [device, mySocketId, roomId]);
 
-  // Initialize room
   useEffect(() => {
     let mounted = true;
 
@@ -190,7 +182,6 @@ export default React.memo(function MeetingRoom() {
       });
       if (socketId !== mySocketId) {
         pendingRef.current.push({ producerId, socketId });
-        // Add delay before consuming to ensure everything is ready
         setTimeout(() => consumePending(), 500);
       } else {
         console.log("[newProducer] Ignored own producer");
@@ -200,7 +191,6 @@ export default React.memo(function MeetingRoom() {
     const handleExisting = (list) => {
       console.log("[existingProducers] list", list);
       list.forEach((p) => pendingRef.current.push(p));
-      // Add delay before consuming existing producers
       setTimeout(() => consumePending(), 1000);
     };
 
@@ -244,7 +234,6 @@ export default React.memo(function MeetingRoom() {
         if (!initializedRef.current) {
           initializedRef.current = true;
 
-          // Create send transport
           socket.emit(
             "createWebRtcTransport",
             { roomId, direction: "send" },
@@ -257,7 +246,20 @@ export default React.memo(function MeetingRoom() {
                 return;
               }
 
-              const transport = _device.createSendTransport(params);
+              const transport = _device.createSendTransport({
+                ...params,
+                iceServers: [
+                  { urls: "stun:stun.l.google.com:19302" },
+                  { urls: "stun:stun1.l.google.com:19302" },
+                  // Add Twilio free TURN server (replace with your credentials)
+                  {
+                    urls: "turn:global.turn.twilio.com:3478?transport=tcp",
+                    username: "your-twilio-turn-username",
+                    credential: "your-twilio-turn-password",
+                  },
+                ],
+                iceTransportPolicy: "all", // Allow TCP (Render blocks UDP)
+              });
               transport.on("connect", ({ dtlsParameters }, cb) =>
                 socket.emit(
                   "connectWebRtcTransport",
@@ -278,7 +280,6 @@ export default React.memo(function MeetingRoom() {
             }
           );
 
-          // Create receive transport
           socket.emit(
             "createWebRtcTransport",
             { roomId, direction: "recv" },
@@ -291,7 +292,19 @@ export default React.memo(function MeetingRoom() {
                 return;
               }
 
-              const transport = _device.createRecvTransport(params);
+              const transport = _device.createRecvTransport({
+                ...params,
+                iceServers: [
+                  { urls: "stun:stun.l.google.com:19302" },
+                  { urls: "stun:stun1.l.google.com:19302" },
+                  {
+                    urls: "turn:global.turn.twilio.com:3478?transport=tcp",
+                    username: "your-twilio-turn-username",
+                    credential: "your-twilio-turn-password",
+                  },
+                ],
+                iceTransportPolicy: "all",
+              });
               transport.on("connect", ({ dtlsParameters }, cb) =>
                 socket.emit(
                   "connectWebRtcTransport",
@@ -303,7 +316,6 @@ export default React.memo(function MeetingRoom() {
               setRecvTransport(transport);
               console.log("[initializeRoom] Recv transport created");
 
-              // Small delay before consuming pending
               setTimeout(() => consumePending(), 500);
             }
           );
@@ -335,7 +347,6 @@ export default React.memo(function MeetingRoom() {
     };
   }, [roomId, mySocketId]);
 
-  // Handle recvTransport updates
   useEffect(() => {
     console.log("[useEffect] recvTransport updated", {
       id: recvTransport?.id,
@@ -346,10 +357,6 @@ export default React.memo(function MeetingRoom() {
     }
   }, [recvTransport, consumePending]);
 
-  // Produce local media
-  // Add this to your MeetingRoom.jsx - Replace the local media production section
-
-  // Produce local media - FIXED VERSION
   useEffect(() => {
     let localStream;
     let mediaStreamRef = null;
@@ -361,7 +368,6 @@ export default React.memo(function MeetingRoom() {
       try {
         console.log("[localStream] Starting media capture...");
 
-        // Get user media with enhanced audio constraints
         const userStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -384,12 +390,9 @@ export default React.memo(function MeetingRoom() {
         const videoTrack = userStream.getVideoTracks()[0];
         localStream = new MediaStream();
 
-        // Validate and add audio track
         if (audioTrack) {
-          // Ensure audio track is not muted and is enabled
           audioTrack.enabled = true;
 
-          // Add event listeners to track audio state changes
           audioTrack.addEventListener("mute", () => {
             console.log("[localStream] Audio track muted");
           });
@@ -414,7 +417,6 @@ export default React.memo(function MeetingRoom() {
             constraints: audioTrack.getConstraints(),
           });
 
-          // Test audio levels
           const audioContext = new (window.AudioContext ||
             window.webkitAudioContext)();
           const source = audioContext.createMediaStreamSource(
@@ -434,7 +436,6 @@ export default React.memo(function MeetingRoom() {
             }
           };
 
-          // Check audio levels for 5 seconds
           const levelCheck = setInterval(checkAudioLevel, 1000);
           setTimeout(() => clearInterval(levelCheck), 5000);
         } else {
@@ -442,7 +443,6 @@ export default React.memo(function MeetingRoom() {
           return;
         }
 
-        // Add video track
         if (videoTrack) {
           videoTrack.enabled = true;
           localStream.addTrack(videoTrack);
@@ -456,19 +456,16 @@ export default React.memo(function MeetingRoom() {
           });
         }
 
-        // Set local video preview
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
-          localVideoRef.current.volume = 0; // Mute local preview
+          localVideoRef.current.volume = 0;
           await localVideoRef.current
             .play()
             .catch((e) => console.error("[localStream] Play error:", e));
         }
 
-        // Wait a moment for tracks to be fully ready
         await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        // Create producers for each track
         const producerPromises = [];
 
         for (const track of localStream.getTracks()) {
@@ -492,7 +489,6 @@ export default React.memo(function MeetingRoom() {
               opusMaxPlaybackRate: 48000,
             };
 
-            // Additional audio-specific options
             produceOptions.appData = {
               source: "microphone",
               trackId: track.id,
@@ -518,7 +514,6 @@ export default React.memo(function MeetingRoom() {
                 }
               );
 
-              // Add producer event listeners
               producer.on("close", () => {
                 console.log(
                   `[localStream] ${track.kind} producer closed:`,
@@ -540,7 +535,6 @@ export default React.memo(function MeetingRoom() {
                 );
               });
 
-              // Ensure producer is not paused
               if (producer.paused) {
                 producer.resume();
               }
@@ -558,7 +552,6 @@ export default React.memo(function MeetingRoom() {
           producerPromises.push(producerPromise);
         }
 
-        // Wait for all producers to be created
         const createdProducers = await Promise.all(producerPromises);
 
         setProducers((prevProducers) => {
@@ -572,7 +565,6 @@ export default React.memo(function MeetingRoom() {
       } catch (error) {
         console.error("[localStream] Error getting media:", error);
 
-        // Try to get audio-only if video fails
         if (
           error.name === "NotFoundError" ||
           error.name === "DevicesNotFoundError"
@@ -627,7 +619,6 @@ export default React.memo(function MeetingRoom() {
     };
   }, [sendTransport]);
 
-  // Handle producer closed
   useEffect(() => {
     const onClosed = ({ socketId }) => {
       console.log("[producerClosed] removing", socketId);

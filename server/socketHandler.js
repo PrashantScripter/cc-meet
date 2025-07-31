@@ -30,10 +30,8 @@ module.exports = (socket, worker, io) => {
     addParticipant(roomId, socket.id);
     socket.join(roomId);
 
-    // Send back RTP capabilities
     callback({ rtpCapabilities: room.router.rtpCapabilities });
 
-    // Tell ONLY the newly joined client about all existing producers
     const allProducers = getProducerIds(roomId, socket.id);
     if (allProducers.length) {
       socket.emit("existingProducers", allProducers);
@@ -48,38 +46,18 @@ module.exports = (socket, worker, io) => {
       if (!room) return callback({ error: "Room not found" });
 
       try {
-        // const transport = await room.router.createWebRtcTransport({
-        //   listenIps: [{ ip: "0.0.0.0", announcedIp: "127.0.0.1" }],
-        //   enableUdp: true,
-        //   enableTcp: true,
-        //   preferUdp: true,
-        //   initialAvailableOutgoingBitrate: 1000000,
-        //   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        // });
-
         const transport = await room.router.createWebRtcTransport({
           listenIps: [
             {
               ip: "0.0.0.0",
-              announcedIp: process.env.PUBLIC_IP, // e.g. cc-meet.onrender.com
+              announcedIp:
+                process.env.PUBLIC_IP || "cc-meet.onrender.com", // Replace with your Render domain
             },
           ],
-          enableUdp: false, // Render blocks UDP
-          enableTcp: true, // allow TCP ICE candidates
-          preferUdp: false, // prefer TCP since UDP is blocked
+          enableUdp: false, // Disable UDP since Render blocks it
+          enableTcp: true, // Enable TCP
+          preferTcp: true, // Prioritize TCP
           initialAvailableOutgoingBitrate: 1000000,
-          iceServers: [
-            { urls: ["stun:stun.l.google.com:19302"] }, // STUN fallback (optional)
-
-            {
-              urls: [
-                "turn:turn.yourdomain.com:3478?transport=tcp", // TURN over TCP
-                "turns:turn.yourdomain.com:5349?transport=tcp", // TURN over TLS
-              ],
-              username: process.env.TURN_USER,
-              credential: process.env.TURN_PASS,
-            },
-          ],
         });
 
         transport.on("icestatechange", (s) =>
@@ -157,13 +135,6 @@ module.exports = (socket, worker, io) => {
           rtpParameters,
           closed: producer.closed,
           track: producer.track,
-          // ? {
-          //     id: producer.track.id,
-          //     kind: producer.track.kind,
-          //     readyState: producer.track.readyState,
-          //     enabled: producer.track.enabled,
-          //   }
-          // : null,
         });
 
         setInterval(async () => {
@@ -202,7 +173,6 @@ module.exports = (socket, worker, io) => {
     }
   );
 
-  // socketHandler.js - Key improvements for consume method
   socket.on(
     "consume",
     async ({ roomId, transportId, producerId, rtpCapabilities }, callback) => {
@@ -216,7 +186,6 @@ module.exports = (socket, worker, io) => {
       }
 
       try {
-        // Find the producer
         let targetProducer = null;
         for (const [, participant] of room.participants) {
           targetProducer = participant.producers.find(
@@ -230,7 +199,6 @@ module.exports = (socket, worker, io) => {
           return callback({ error: "Producer not found" });
         }
 
-        // Check if producer is ready
         if (targetProducer.closed) {
           console.error("Producer is closed:", producerId);
           return callback({ error: "Producer is closed" });
@@ -243,7 +211,6 @@ module.exports = (socket, worker, io) => {
           paused: targetProducer.paused,
         });
 
-        // Check if router can consume
         if (!room.router.canConsume({ producerId, rtpCapabilities })) {
           console.error("Cannot consume producer:", producerId);
           return callback({
@@ -253,11 +220,10 @@ module.exports = (socket, worker, io) => {
 
         console.log("Creating consumer for producer:", producerId);
 
-        // Create consumer with paused: false to start immediately
         const consumer = await transport.consume({
           producerId,
           rtpCapabilities,
-          paused: false, // Changed from true to false
+          paused: false,
         });
 
         console.log("Consumer created successfully:", {
@@ -269,7 +235,6 @@ module.exports = (socket, worker, io) => {
           rtpParameters: consumer.rtpParameters,
         });
 
-        // Add event listeners
         consumer.on("close", () => {
           console.log("Consumer closed:", consumer.id);
         });
@@ -282,13 +247,11 @@ module.exports = (socket, worker, io) => {
           console.log("Consumer resumed:", consumer.id);
         });
 
-        // Ensure consumer is resumed (though it should start unpaused)
         if (consumer.paused) {
           await consumer.resume();
           console.log("Consumer resumed:", consumer.id);
         }
 
-        // Add consumer stats logging
         setInterval(async () => {
           try {
             const stats = await consumer.getStats();
@@ -300,7 +263,7 @@ module.exports = (socket, worker, io) => {
           } catch (err) {
             console.error("Error getting consumer stats:", err);
           }
-        }, 30 * 1000); // Every 30 seconds
+        }, 30 * 1000);
 
         addConsumer(roomId, socket.id, consumer);
 
