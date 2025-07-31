@@ -61,20 +61,21 @@ module.exports = (socket, worker, io) => {
           listenIps: [
             {
               ip: "0.0.0.0",
-              announcedIp: process.env.PUBLIC_IP, // e.g. your-render-app.onrender.com
+              announcedIp: process.env.PUBLIC_IP, // e.g. cc-meet.onrender.com
             },
           ],
-          enableUdp: false,
-          enableTcp: false,
-          preferUdp: false,
+          enableUdp: false, // Render blocks UDP
+          enableTcp: true, // allow TCP ICE candidates
+          preferUdp: false, // prefer TCP since UDP is blocked
           initialAvailableOutgoingBitrate: 1000000,
           iceServers: [
-            // public STUN
-            { urls: ["stun:stun.l.google.com:19302"] },
+            { urls: ["stun:stun.l.google.com:19302"] }, // STUN fallback (optional)
 
-            // TURN “suite”: UDP, TCP fallback, then TLS on 5349
             {
-              urls: ["turns:turn.yourdomain.com:5349?transport=tcp"],
+              urls: [
+                "turn:turn.yourdomain.com:3478?transport=tcp", // TURN over TCP
+                "turns:turn.yourdomain.com:5349?transport=tcp", // TURN over TLS
+              ],
               username: process.env.TURN_USER,
               credential: process.env.TURN_PASS,
             },
