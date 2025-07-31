@@ -48,14 +48,43 @@ module.exports = (socket, worker, io) => {
       if (!room) return callback({ error: "Room not found" });
 
       try {
+        // const transport = await room.router.createWebRtcTransport({
+        //   listenIps: [{ ip: "0.0.0.0", announcedIp: "127.0.0.1" }],
+        //   enableUdp: true,
+        //   enableTcp: true,
+        //   preferUdp: true,
+        //   initialAvailableOutgoingBitrate: 1000000,
+        //   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        // });
+
         const transport = await room.router.createWebRtcTransport({
-          listenIps: [{ ip: "0.0.0.0", announcedIp: "127.0.0.1" }],
+          listenIps: [
+            {
+              ip: "0.0.0.0",
+              announcedIp: process.env.PUBLIC_IP, // e.g. your-render-app.onrender.com
+            },
+          ],
           enableUdp: true,
           enableTcp: true,
           preferUdp: true,
           initialAvailableOutgoingBitrate: 1000000,
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+          iceServers: [
+            // public STUN
+            { urls: ["stun:stun.l.google.com:19302"] },
+
+            // TURN “suite”: UDP, TCP fallback, then TLS on 5349
+            {
+              urls: [
+                "turn:turn.yourdomain.com:3478?transport=udp", // UDP first
+                "turn:turn.yourdomain.com:3478?transport=tcp", // TCP fallback
+                "turns:turn.yourdomain.com:5349?transport=tcp", // TURN-over-TLS
+              ],
+              username: process.env.TURN_USER,
+              credential: process.env.TURN_PASS,
+            },
+          ],
         });
+
 
         transport.on("icestatechange", (s) =>
           console.log("ICE state", s, "for", transport.id)
