@@ -1,4 +1,3 @@
-// socketHandler.js
 const {
   getRoom,
   addParticipant,
@@ -50,24 +49,34 @@ module.exports = (socket, worker, io) => {
 
       try {
         const transport = await room.router.createWebRtcTransport({
-          listenIps: [{ ip: "127.0.0.1" }],
+          listenIps: [{ ip: "0.0.0.0", announcedIp: "127.0.0.1" }],
           enableUdp: true,
           enableTcp: true,
           preferUdp: true,
+          initialAvailableOutgoingBitrate: 1000000,
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
 
-        // Log ICE/DTLS events
         transport.on("icestatechange", (s) =>
           console.log("ICE state", s, "for", transport.id)
         );
         transport.on("dtlsstatechange", (s) =>
           console.log("DTLS state", s, "for", transport.id)
         );
+        transport.on("close", () =>
+          console.log("Transport closed:", transport.id)
+        );
 
-        // Store on the correct side (send vs recv)
         setTransport(roomId, socket.id, direction, transport);
+        console.log(
+          "Transport set:",
+          transport.id,
+          "for socket:",
+          socket.id,
+          "direction:",
+          direction
+        );
 
-        // Reply with params the client needs to construct its Transport
         callback({
           id: transport.id,
           iceParameters: transport.iceParameters,
@@ -91,6 +100,7 @@ module.exports = (socket, worker, io) => {
       }
       try {
         await transport.connect({ dtlsParameters });
+        console.log("Transport connected:", transportId);
         callback({});
       } catch (err) {
         console.error("Error connecting transport:", err);
@@ -107,17 +117,52 @@ module.exports = (socket, worker, io) => {
 
       try {
         const producer = await transport.produce({ kind, rtpParameters });
+        producer.on("close", () => {
+          console.log("Producer closed:", producer.id);
+          io.to(roomId).emit("producerClosed", {
+            socketId: socket.id,
+            producerIds: [producer.id],
+          });
+        });
         addProducer(roomId, socket.id, producer);
 
-        // Log producer details
         console.log("Producer created:", {
           id: producer.id,
           kind: producer.kind,
-          rtpParameters: producer.rtpParameters,
+          rtpParameters,
           closed: producer.closed,
+          track: producer.track,
+          // ? {
+          //     id: producer.track.id,
+          //     kind: producer.track.kind,
+          //     readyState: producer.track.readyState,
+          //     enabled: producer.track.enabled,
+          //   }
+          // : null,
         });
 
-        // Notify ALL peers in the room (including self) about the new producer
+        setInterval(async () => {
+          try {
+            const stats = await producer.getStats();
+            const statsMap =
+              stats instanceof Map ? stats : new Map(Object.entries(stats));
+            const outboundRtp =
+              statsMap.get("outbound-rtp")?.values().next().value ||
+              (Array.isArray(stats)
+                ? stats.find((s) => s.type === "outbound-rtp")
+                : {});
+            console.log("Producer stats:", {
+              id: producer.id,
+              kind: producer.kind,
+              packetsSent:
+                outboundRtp?.packetsSent || outboundRtp?.packetCount || 0,
+              stats,
+            });
+          } catch (err) {
+            console.error("Error getting producer stats:", err);
+          }
+        }, 60 * 1000);
+
         io.to(roomId).emit("newProducer", {
           producerId: producer.id,
           socketId: socket.id,
@@ -132,6 +177,7 @@ module.exports = (socket, worker, io) => {
     }
   );
 
+  // socketHandler.js - Key improvements for consume method
   socket.on(
     "consume",
     async ({ roomId, transportId, producerId, rtpCapabilities }, callback) => {
@@ -145,24 +191,91 @@ module.exports = (socket, worker, io) => {
       }
 
       try {
-        if (!room.router.canConsume({ producerId, rtpCapabilities })) {
-          return callback({ error: "Cannot consume" });
+        // Find the producer
+        let targetProducer = null;
+        for (const [, participant] of room.participants) {
+          targetProducer = participant.producers.find(
+            (p) => p.id === producerId
+          );
+          if (targetProducer) break;
         }
 
+        if (!targetProducer) {
+          console.error("Producer not found:", producerId);
+          return callback({ error: "Producer not found" });
+        }
+
+        // Check if producer is ready
+        if (targetProducer.closed) {
+          console.error("Producer is closed:", producerId);
+          return callback({ error: "Producer is closed" });
+        }
+
+        console.log("Producer state before consume:", {
+          id: targetProducer.id,
+          kind: targetProducer.kind,
+          closed: targetProducer.closed,
+          paused: targetProducer.paused,
+        });
+
+        // Check if router can consume
+        if (!room.router.canConsume({ producerId, rtpCapabilities })) {
+          console.error("Cannot consume producer:", producerId);
+          return callback({
+            error: "Cannot consume - RTP capabilities mismatch",
+          });
+        }
+
+        console.log("Creating consumer for producer:", producerId);
+
+        // Create consumer with paused: false to start immediately
         const consumer = await transport.consume({
           producerId,
           rtpCapabilities,
+          paused: false, // Changed from true to false
         });
-        await consumer.resume();
 
-        // Log consumer details
-        console.log("Consumer created:", {
+        console.log("Consumer created successfully:", {
           id: consumer.id,
           producerId: consumer.producerId,
           kind: consumer.kind,
+          closed: consumer.closed,
+          paused: consumer.paused,
           rtpParameters: consumer.rtpParameters,
-          track: consumer.track,
         });
+
+        // Add event listeners
+        consumer.on("close", () => {
+          console.log("Consumer closed:", consumer.id);
+        });
+
+        consumer.on("pause", () => {
+          console.log("Consumer paused:", consumer.id);
+        });
+
+        consumer.on("resume", () => {
+          console.log("Consumer resumed:", consumer.id);
+        });
+
+        // Ensure consumer is resumed (though it should start unpaused)
+        if (consumer.paused) {
+          await consumer.resume();
+          console.log("Consumer resumed:", consumer.id);
+        }
+
+        // Add consumer stats logging
+        setInterval(async () => {
+          try {
+            const stats = await consumer.getStats();
+            console.log("Consumer stats:", {
+              id: consumer.id,
+              kind: consumer.kind,
+              stats: Array.isArray(stats) ? stats : Object.values(stats),
+            });
+          } catch (err) {
+            console.error("Error getting consumer stats:", err);
+          }
+        }, 30 * 1000); // Every 30 seconds
 
         addConsumer(roomId, socket.id, consumer);
 
@@ -174,7 +287,7 @@ module.exports = (socket, worker, io) => {
         });
       } catch (err) {
         console.error("Error consuming:", err);
-        callback({ error: "Failed to consume" });
+        callback({ error: `Failed to consume: ${err.message}` });
       }
     }
   );
@@ -182,12 +295,15 @@ module.exports = (socket, worker, io) => {
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
 
-    // Notify everyone else and clean up
     for (const [roomId] of rooms) {
       const room = getRoom(roomId);
       if (!room || !room.participants.has(socket.id)) continue;
       const participant = room.participants.get(socket.id);
       const producerIds = participant.producers.map((p) => p.id);
+      participant.producers.forEach((p) => {
+        p.close();
+        console.log("Producer closed on disconnect:", p.id);
+      });
 
       socket.to(roomId).emit("producerClosed", {
         socketId: socket.id,

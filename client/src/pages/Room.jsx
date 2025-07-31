@@ -7,8 +7,18 @@ import VideoGrid from "../components/VideoGrid";
 import socket from "../socket.js";
 
 export default React.memo(function MeetingRoom() {
-  const { roomId } = useParams();
   const [device, setDevice] = useState(null);
+  const [audioContext, setAudioContext] = useState(null);
+
+  // Create AudioContext when device is ready
+  useEffect(() => {
+    if (device && !audioContext) {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      setAudioContext(ac);
+    }
+  }, [device]);
+
+  const { roomId } = useParams();
   const [sendTransport, setSendTransport] = useState(null);
   const [recvTransport, setRecvTransport] = useState(null);
   const [producers, setProducers] = useState([]);
@@ -36,10 +46,7 @@ export default React.memo(function MeetingRoom() {
     if (!currentDevice || !recvTransportRef.current) {
       console.log(
         "[consumePending] Skipped: device or recvTransport not ready",
-        {
-          device: !!currentDevice,
-          recvTransport: !!recvTransportRef.current,
-        }
+        { device: !!currentDevice, recvTransport: !!recvTransportRef.current }
       );
       return;
     }
@@ -65,46 +72,111 @@ export default React.memo(function MeetingRoom() {
         producerId,
         socketId,
       });
+
       try {
-        socket.emit(
-          "consume",
-          {
-            roomId,
-            producerId,
-            rtpCapabilities: currentDevice.rtpCapabilities,
-            transportId: recvTransportRef.current.id,
-          },
-          async (params) => {
-            if (params.error) {
-              console.error("[consumePending] Error consuming", params.error);
-              return;
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error("Consume timeout")),
+            10000
+          );
+
+          socket.emit(
+            "consume",
+            {
+              roomId,
+              producerId,
+              rtpCapabilities: currentDevice.rtpCapabilities,
+              transportId: recvTransportRef.current.id,
+            },
+            async (params) => {
+              clearTimeout(timeout);
+
+              if (params.error) {
+                console.error("[consumePending] Error consuming", params.error);
+                reject(new Error(params.error));
+                return;
+              }
+
+              console.log(
+                "[consumePending] Successfully got consume params",
+                params
+              );
+
+              try {
+                // Add a small delay to ensure transport is ready
+                await new Promise((r) => setTimeout(r, 100));
+
+                const consumer = await recvTransportRef.current.consume(params);
+                console.log("[consumePending] Consumer created:", {
+                  id: consumer.id,
+                  kind: consumer.kind,
+                  producerId: consumer.producerId,
+                  track: consumer.track
+                    ? {
+                        id: consumer.track.id,
+                        kind: consumer.track.kind,
+                        readyState: consumer.track.readyState,
+                        enabled: consumer.track.enabled,
+                        muted: consumer.track.muted,
+                      }
+                    : null,
+                });
+
+                // Resume the consumer
+                await consumer.resume();
+                console.log("[consumePending] Consumer resumed");
+
+                // Wait a bit more for track to be ready
+                await new Promise((r) => setTimeout(r, 200));
+
+                if (consumer.track) {
+                  console.log("[consumePending] Final track state:", {
+                    kind: consumer.kind,
+                    readyState: consumer.track.readyState,
+                    enabled: consumer.track.enabled,
+                    muted: consumer.track.muted,
+                  });
+                } else {
+                  console.warn(
+                    "[consumePending] No track available for consumer"
+                  );
+                }
+
+                setConsumers((prev) => {
+                  const filtered = prev.filter(
+                    (c) => c.producerId !== params.producerId
+                  );
+                  const updated = [
+                    ...filtered,
+                    { consumer, producerId: params.producerId, socketId },
+                  ];
+                  console.log(
+                    "[setConsumers] Updated consumers",
+                    updated.length
+                  );
+                  return updated;
+                });
+
+                resolve();
+              } catch (consumeError) {
+                console.error(
+                  "[consumePending] Consumer creation error:",
+                  consumeError
+                );
+                reject(consumeError);
+              }
             }
-            console.log("[consumePending] Successfully consumed", params);
-            const consumer = await recvTransportRef.current.consume(params);
-            await consumer.resume();
-            if (consumer.track) {
-              console.log("[consumePending] Track", {
-                kind: consumer.kind,
-                readyState: consumer.track.readyState,
-              });
-            } else {
-              console.warn("[consumePending] No track available for consumer");
-            }
-            setConsumers((prev) => {
-              const updated = [
-                ...prev.filter((c) => c.producerId !== params.producerId),
-                { consumer, producerId: params.producerId, socketId },
-              ];
-              console.log("[setConsumers] Updated consumers", updated);
-              return updated;
-            });
-          }
-        );
+          );
+        });
       } catch (error) {
-        console.error("[consumePending] Exception", error);
+        console.error(
+          "[consumePending] Exception for producer",
+          producerId,
+          error
+        );
       }
     }
-  }, [mySocketId, roomId]);
+  }, [device, mySocketId, roomId]);
 
   // Initialize room
   useEffect(() => {
@@ -118,7 +190,8 @@ export default React.memo(function MeetingRoom() {
       });
       if (socketId !== mySocketId) {
         pendingRef.current.push({ producerId, socketId });
-        consumePending();
+        // Add delay before consuming to ensure everything is ready
+        setTimeout(() => consumePending(), 500);
       } else {
         console.log("[newProducer] Ignored own producer");
       }
@@ -127,7 +200,8 @@ export default React.memo(function MeetingRoom() {
     const handleExisting = (list) => {
       console.log("[existingProducers] list", list);
       list.forEach((p) => pendingRef.current.push(p));
-      consumePending();
+      // Add delay before consuming existing producers
+      setTimeout(() => consumePending(), 1000);
     };
 
     socket.on("newProducer", handleNew);
@@ -145,6 +219,7 @@ export default React.memo(function MeetingRoom() {
             resolve(data);
           });
         });
+
         if (!mounted || !response || response.error) {
           console.error(
             "[joinRoom] Error:",
@@ -169,10 +244,19 @@ export default React.memo(function MeetingRoom() {
         if (!initializedRef.current) {
           initializedRef.current = true;
 
+          // Create send transport
           socket.emit(
             "createWebRtcTransport",
             { roomId, direction: "send" },
             (params) => {
+              if (params.error) {
+                console.error(
+                  "[initializeRoom] Send transport error:",
+                  params.error
+                );
+                return;
+              }
+
               const transport = _device.createSendTransport(params);
               transport.on("connect", ({ dtlsParameters }, cb) =>
                 socket.emit(
@@ -194,10 +278,19 @@ export default React.memo(function MeetingRoom() {
             }
           );
 
+          // Create receive transport
           socket.emit(
             "createWebRtcTransport",
             { roomId, direction: "recv" },
             (params) => {
+              if (params.error) {
+                console.error(
+                  "[initializeRoom] Recv transport error:",
+                  params.error
+                );
+                return;
+              }
+
               const transport = _device.createRecvTransport(params);
               transport.on("connect", ({ dtlsParameters }, cb) =>
                 socket.emit(
@@ -209,7 +302,9 @@ export default React.memo(function MeetingRoom() {
               recvTransportRef.current = transport;
               setRecvTransport(transport);
               console.log("[initializeRoom] Recv transport created");
-              consumePending();
+
+              // Small delay before consuming pending
+              setTimeout(() => consumePending(), 500);
             }
           );
         }
@@ -224,8 +319,14 @@ export default React.memo(function MeetingRoom() {
       mounted = false;
       socket.off("newProducer", handleNew);
       socket.off("existingProducers", handleExisting);
-      if (sendTransportRef.current) sendTransportRef.current.close();
-      if (recvTransportRef.current) recvTransportRef.current.close();
+      if (sendTransportRef.current) {
+        sendTransportRef.current.close();
+        sendTransportRef.current = null;
+      }
+      if (recvTransportRef.current) {
+        recvTransportRef.current.close();
+        recvTransportRef.current = null;
+      }
       setSendTransport(null);
       setRecvTransport(null);
       setProducers([]);
@@ -240,95 +341,288 @@ export default React.memo(function MeetingRoom() {
       id: recvTransport?.id,
       closed: recvTransport?.closed,
     });
-    consumePending();
-  }, [recvTransport]);
+    if (recvTransport) {
+      setTimeout(() => consumePending(), 300);
+    }
+  }, [recvTransport, consumePending]);
 
   // Produce local media
+  // Add this to your MeetingRoom.jsx - Replace the local media production section
+
+  // Produce local media - FIXED VERSION
   useEffect(() => {
     let localStream;
+    let mediaStreamRef = null;
+
     if (!sendTransport) return;
 
     (async () => {
       if (sendTransport.closed) return;
       try {
-        // Create a synthetic audio stream (440Hz sine wave)
+        console.log("[localStream] Starting media capture...");
+
+        // Get user media with enhanced audio constraints
+        const userStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000,
+            channelCount: 1,
+            latency: 0.01,
+            volume: 1.0,
+          },
+          video: {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            frameRate: { ideal: 30, max: 30 },
+          },
+        });
+
+        mediaStreamRef = userStream;
+        const audioTrack = userStream.getAudioTracks()[0];
+        const videoTrack = userStream.getVideoTracks()[0];
         localStream = new MediaStream();
-        const audioContext = new AudioContext();
-        const oscillator = audioContext.createOscillator();
-        oscillator.type = "sine";
-        oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-        oscillator.start();
-        const destination = audioContext.createMediaStreamDestination();
-        oscillator.connect(destination);
-        const audioTrack = destination.stream.getAudioTracks()[0];
-        localStream.addTrack(audioTrack);
-        console.log("[localStream] Added synthetic audio track:", {
-          id: audioTrack.id,
-          kind: audioTrack.kind,
-          enabled: audioTrack.enabled,
-          muted: audioTrack.muted,
-          readyState: audioTrack.readyState,
-          settings: audioTrack.getSettings(),
-        });
 
-        // Add video track from camera
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
-        const videoTrack = videoStream.getVideoTracks()[0];
-        localStream.addTrack(videoTrack);
-        console.log("[localStream] Added video track:", {
-          id: videoTrack.id,
-          kind: videoTrack.kind,
-          enabled: videoTrack.enabled,
-          muted: videoTrack.muted,
-          readyState: videoTrack.readyState,
-          settings: videoTrack.getSettings(),
-        });
+        // Validate and add audio track
+        if (audioTrack) {
+          // Ensure audio track is not muted and is enabled
+          audioTrack.enabled = true;
 
-        // Initially disable tracks (to match MediaControl.jsx behavior)
-        localStream.getTracks().forEach((track) => {
-          track.enabled = false;
-          console.log("[localStream] Track initialized:", {
-            kind: track.kind,
-            enabled: track.enabled,
+          // Add event listeners to track audio state changes
+          audioTrack.addEventListener("mute", () => {
+            console.log("[localStream] Audio track muted");
           });
-        });
 
+          audioTrack.addEventListener("unmute", () => {
+            console.log("[localStream] Audio track unmuted");
+          });
+
+          audioTrack.addEventListener("ended", () => {
+            console.log("[localStream] Audio track ended");
+          });
+
+          localStream.addTrack(audioTrack);
+
+          console.log("[localStream] Added microphone audio track:", {
+            id: audioTrack.id,
+            kind: audioTrack.kind,
+            enabled: audioTrack.enabled,
+            muted: audioTrack.muted,
+            readyState: audioTrack.readyState,
+            settings: audioTrack.getSettings(),
+            constraints: audioTrack.getConstraints(),
+          });
+
+          // Test audio levels
+          const audioContext = new (window.AudioContext ||
+            window.webkitAudioContext)();
+          const source = audioContext.createMediaStreamSource(
+            new MediaStream([audioTrack])
+          );
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          const checkAudioLevel = () => {
+            analyser.getByteFrequencyData(dataArray);
+            const average =
+              dataArray.reduce((a, b) => a + b) / dataArray.length;
+            if (average > 0) {
+              console.log("[localStream] Audio level detected:", average);
+            }
+          };
+
+          // Check audio levels for 5 seconds
+          const levelCheck = setInterval(checkAudioLevel, 1000);
+          setTimeout(() => clearInterval(levelCheck), 5000);
+        } else {
+          console.error("[localStream] No audio track found!");
+          return;
+        }
+
+        // Add video track
+        if (videoTrack) {
+          videoTrack.enabled = true;
+          localStream.addTrack(videoTrack);
+          console.log("[localStream] Added video track:", {
+            id: videoTrack.id,
+            kind: videoTrack.kind,
+            enabled: videoTrack.enabled,
+            muted: videoTrack.muted,
+            readyState: videoTrack.readyState,
+            settings: videoTrack.getSettings(),
+          });
+        }
+
+        // Set local video preview
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
+          localVideoRef.current.volume = 0; // Mute local preview
           await localVideoRef.current
             .play()
             .catch((e) => console.error("[localStream] Play error:", e));
-        } else {
-          console.warn("[localStream] localVideoRef not ready");
         }
 
+        // Wait a moment for tracks to be fully ready
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Create producers for each track
+        const producerPromises = [];
+
         for (const track of localStream.getTracks()) {
-          let produceOptions = { track };
-          if (track.kind === "audio") {
-            produceOptions.codecOptions = { opusStereo: 1 };
-          }
-          const producer = await sendTransport.produce(produceOptions);
-          console.log("[localStream] Producer created:", {
-            id: producer.id,
-            kind: producer.kind,
-            track: {
+          console.log(
+            `[localStream] Creating producer for ${track.kind} track:`,
+            {
               id: track.id,
               enabled: track.enabled,
               readyState: track.readyState,
-            },
-          });
-          setProducers((p) => [...p, producer]);
+              muted: track.muted,
+            }
+          );
+
+          let produceOptions = { track };
+
+          if (track.kind === "audio") {
+            produceOptions.codecOptions = {
+              opusStereo: 1,
+              opusDtx: 1,
+              opusFec: 1,
+              opusMaxPlaybackRate: 48000,
+            };
+
+            // Additional audio-specific options
+            produceOptions.appData = {
+              source: "microphone",
+              trackId: track.id,
+            };
+          }
+
+          const producerPromise = sendTransport
+            .produce(produceOptions)
+            .then((producer) => {
+              console.log(
+                `[localStream] ${track.kind} producer created successfully:`,
+                {
+                  id: producer.id,
+                  kind: producer.kind,
+                  closed: producer.closed,
+                  paused: producer.paused,
+                  track: {
+                    id: track.id,
+                    enabled: track.enabled,
+                    readyState: track.readyState,
+                    muted: track.muted,
+                  },
+                }
+              );
+
+              // Add producer event listeners
+              producer.on("close", () => {
+                console.log(
+                  `[localStream] ${track.kind} producer closed:`,
+                  producer.id
+                );
+              });
+
+              producer.on("pause", () => {
+                console.log(
+                  `[localStream] ${track.kind} producer paused:`,
+                  producer.id
+                );
+              });
+
+              producer.on("resume", () => {
+                console.log(
+                  `[localStream] ${track.kind} producer resumed:`,
+                  producer.id
+                );
+              });
+
+              // Ensure producer is not paused
+              if (producer.paused) {
+                producer.resume();
+              }
+
+              return producer;
+            })
+            .catch((error) => {
+              console.error(
+                `[localStream] Error creating ${track.kind} producer:`,
+                error
+              );
+              throw error;
+            });
+
+          producerPromises.push(producerPromise);
         }
+
+        // Wait for all producers to be created
+        const createdProducers = await Promise.all(producerPromises);
+
+        setProducers((prevProducers) => {
+          const newProducers = [...prevProducers, ...createdProducers];
+          console.log(
+            "[localStream] All producers created. Total:",
+            newProducers.length
+          );
+          return newProducers;
+        });
       } catch (error) {
         console.error("[localStream] Error getting media:", error);
+
+        // Try to get audio-only if video fails
+        if (
+          error.name === "NotFoundError" ||
+          error.name === "DevicesNotFoundError"
+        ) {
+          console.log("[localStream] Trying audio-only fallback...");
+          try {
+            const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 48000,
+              },
+            });
+
+            const audioTrack = audioOnlyStream.getAudioTracks()[0];
+            if (audioTrack) {
+              audioTrack.enabled = true;
+              const producer = await sendTransport.produce({
+                track: audioTrack,
+                codecOptions: { opusStereo: 1, opusDtx: 1, opusFec: 1 },
+              });
+              setProducers((prev) => [...prev, producer]);
+              console.log(
+                "[localStream] Audio-only producer created:",
+                producer.id
+              );
+            }
+          } catch (audioError) {
+            console.error(
+              "[localStream] Audio-only fallback failed:",
+              audioError
+            );
+          }
+        }
       }
     })();
 
     return () => {
+      console.log("[localStream] Cleaning up media streams...");
       if (localStream) {
-        localStream.getTracks().forEach((t) => t.stop());
+        localStream.getTracks().forEach((track) => {
+          console.log(`[localStream] Stopping ${track.kind} track:`, track.id);
+          track.stop();
+        });
+      }
+      if (mediaStreamRef) {
+        mediaStreamRef.getTracks().forEach((track) => {
+          track.stop();
+        });
       }
     };
   }, [sendTransport]);
@@ -344,11 +638,12 @@ export default React.memo(function MeetingRoom() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-200">
+    <div className="flex flex-col gap-4 h-dvh w-dvw p-4 bg-zinc-950">
       <VideoGrid
         consumers={consumers}
         localVideoRef={localVideoRef}
         mySocketId={mySocketId}
+        audioContext={audioContext}
       />
       <Controls producers={producers} />
     </div>

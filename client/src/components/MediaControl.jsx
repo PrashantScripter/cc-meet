@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { FaVideo } from "react-icons/fa6";
+import { FaVideoSlash } from "react-icons/fa6";
+import { FaMicrophone } from "react-icons/fa6";
+import { IoMdMicOff } from "react-icons/io";
+import { ImPhoneHangUp } from "react-icons/im";
 
 function Controls({ producers }) {
-  const [audioEnabled, setAudioEnabled] = useState(false);
-  const [videoEnabled, setVideoEnabled] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -38,24 +43,32 @@ function Controls({ producers }) {
   };
 
   return (
-    <div className="flex justify-center p-4 bg-gray-800">
+    <div className="flex justify-center">
       <button
         onClick={toggleAudio}
-        className="mx-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        className="mx-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer"
       >
-        {audioEnabled ? "Mute" : "Unmute"}
+        {audioEnabled ? (
+          <FaMicrophone className="size-5" />
+        ) : (
+          <IoMdMicOff className="size-5 " />
+        )}
       </button>
       <button
         onClick={toggleVideo}
-        className="mx-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        className="mx-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer"
       >
-        {videoEnabled ? "Turn Off Camera" : "Turn On Camera"}
+        {videoEnabled ? (
+          <FaVideo className="size-5" />
+        ) : (
+          <FaVideoSlash className="size-5" />
+        )}
       </button>
       <button
         onClick={leaveCall}
-        className="mx-2 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+        className="mx-2 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 cursor-pointer"
       >
-        Leave Call
+        <ImPhoneHangUp className="size-5" />
       </button>
     </div>
   );

@@ -1,7 +1,19 @@
-// src/components/VideoGrid.jsx
 import React, { useEffect, useRef, useState, memo } from "react";
 
-export default function VideoGrid({ consumers, localVideoRef, mySocketId }) {
+export default function VideoGrid({
+  consumers,
+  localVideoRef,
+  mySocketId,
+  audioContext,
+}) {
+  const [gridDimensions, setGridDimensions] = useState({
+    columns: 1,
+    tileWidth: 0,
+    tileHeight: 0,
+  });
+  const containerRef = useRef(null);
+
+  // Build consumer map
   const consumerMap = new Map();
   consumers.forEach(({ consumer, producerId, socketId }) => {
     if (socketId !== mySocketId) {
@@ -30,222 +42,200 @@ export default function VideoGrid({ consumers, localVideoRef, mySocketId }) {
     (entry) => entry.video || entry.audio
   );
 
+  // Calculate grid layout dynamically
+  useEffect(() => {
+    const updateGridLayout = () => {
+      if (!containerRef.current) return;
+
+      const containerWidth = containerRef.current.offsetWidth;
+      const containerHeight = containerRef.current.offsetHeight;
+      const participantCount = uniqueConsumers.length + 1; // Include local video
+      const aspectRatio = 16 / 9; // Standard video aspect ratio
+
+      // Calculate optimal number of columns
+      const columns = Math.ceil(Math.sqrt(participantCount));
+      const rows = Math.ceil(participantCount / columns);
+
+      // Calculate tile dimensions while maintaining aspect ratio
+      const tileWidth = Math.min(
+        containerWidth / columns,
+        (containerHeight / rows) * aspectRatio
+      );
+      const tileHeight = tileWidth / aspectRatio;
+
+      setGridDimensions({ columns, tileWidth, tileHeight });
+    };
+
+    updateGridLayout();
+    window.addEventListener("resize", updateGridLayout);
+
+    return () => window.removeEventListener("resize", updateGridLayout);
+  }, [uniqueConsumers.length]);
+
   console.log("[VideoGrid] Unique consumers:", uniqueConsumers);
   console.log("[VideoGrid] Raw consumers:", consumers);
 
   return (
-    <div className="flex flex-col items-center w-full h-full gap-4 p-4">
-      <div className="flex flex-wrap justify-center items-start w-full h-full gap-4">
+    <div
+      ref={containerRef}
+      className="w-full h-full bg-blue-100 rounded-2xl p-4 overflow-hidden"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${gridDimensions.columns}, minmax(0, ${gridDimensions.tileWidth}px))`,
+        gap: "8px",
+        justifyContent: "center",
+        alignContent: "center",
+      }}
+    >
+      <div className="relative">
         <video
           ref={localVideoRef}
           autoPlay
           muted
           playsInline
-          className="rounded-lg border shadow w-64 h-48 object-cover bg-black"
+          className="rounded-2xl border-2 border-black shadow w-full h-full object-cover bg-black"
+          style={{
+            aspectRatio: "16/9",
+            maxWidth: `${gridDimensions.tileWidth}px`,
+            maxHeight: `${gridDimensions.tileHeight}px`,
+          }}
         />
-        {uniqueConsumers.map((entry, index) => (
-          <RemotePeer
-            key={index}
-            audioConsumer={entry.audio}
-            videoConsumer={entry.video}
-          />
-        ))}
+        <div className="absolute top-2 right-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">
+          You
+        </div>
       </div>
+      {uniqueConsumers.map((entry, index) => (
+        <RemotePeer
+          key={index}
+          audioConsumer={entry.audio}
+          videoConsumer={entry.video}
+          audioContext={audioContext}
+          tileWidth={gridDimensions.tileWidth}
+          tileHeight={gridDimensions.tileHeight}
+        />
+      ))}
     </div>
   );
 }
 
-const RemotePeer = memo(({ audioConsumer, videoConsumer }) => {
-  const videoRef = useRef();
-  const audioRef = useRef();
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [userInteracted, setUserInteracted] = useState(false);
+const RemotePeer = memo(
+  ({ audioConsumer, videoConsumer, audioContext, tileWidth, tileHeight }) => {
+    const videoRef = useRef();
+    const audioRef = useRef();
+    const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+    const [userInteracted, setUserInteracted] = useState(false);
 
-  const handleManualPlay = () => {
-    setUserInteracted(true);
-    if (audioRef.current) {
-      audioRef.current.volume = 1;
-      audioRef.current.muted = false;
-      audioRef.current
-        .play()
-        .then(() => {
-          console.log("[RemotePeer] Manual play succeeded");
-          setIsPlaying(true);
-        })
-        .catch((e) =>
-          console.error(`[RemotePeer] Manual audio play error: ${e.message}`, {
-            error: e,
-            readyState: audioRef.current.readyState,
-            muted: audioRef.current.muted,
-            volume: audioRef.current.volume,
-            trackEnabled: audioConsumer?.track?.enabled,
-          })
-        );
-    }
-  };
+    // Setup audio stream
+    useEffect(() => {
+      if (audioConsumer && audioConsumer.track && audioRef.current) {
+        const audioStream = new MediaStream([audioConsumer.track]);
+        audioRef.current.srcObject = audioStream;
+        audioRef.current.volume = 1.0;
 
-  useEffect(() => {
-    if (videoRef.current && videoConsumer && videoConsumer.track) {
-      const stream = new MediaStream();
-      stream.addTrack(videoConsumer.track);
-      videoRef.current.srcObject = stream;
-      videoRef.current
-        .play()
-        .catch((e) =>
-          console.error(`[RemotePeer] Video play error: ${e.message}`)
-        );
-      console.log(
-        "[RemotePeer] Attached video track, readyState:",
-        videoConsumer.track.readyState,
-        "enabled:",
-        videoConsumer.track.enabled
-      );
-    } else if (videoConsumer && !videoConsumer.track) {
-      console.log("[RemotePeer] Video track not available for videoConsumer");
-    }
+        console.log("[RemotePeer] Audio stream setup:", {
+          track: audioConsumer.track,
+          readyState: audioConsumer.track.readyState,
+          enabled: audioConsumer.track.enabled,
+          muted: audioConsumer.track.muted,
+        });
 
-    if (audioRef.current && audioConsumer && audioConsumer.track) {
-      const stream = new MediaStream();
-      stream.addTrack(audioConsumer.track);
-      audioRef.current.srcObject = stream;
-      audioRef.current.volume = 1;
-      audioRef.current.muted = false;
-
-      const tryPlay = () => {
-        if (!userInteracted) {
-          console.log(
-            "[RemotePeer] Waiting for user interaction to play audio"
-          );
-          return;
-        }
-        if (!audioConsumer.track.enabled) {
-          console.log("[RemotePeer] Audio track disabled, skipping play");
-          return;
-        }
         audioRef.current
           .play()
           .then(() => {
-            console.log("[RemotePeer] Auto play succeeded");
-            setIsPlaying(true);
+            setIsAudioPlaying(true);
+            console.log("[RemotePeer] Audio playing automatically");
           })
           .catch((e) => {
-            console.error(`[RemotePeer] Audio play error: ${e.message}`, {
-              error: e,
-              readyState: audioRef.current.readyState,
-              muted: audioRef.current.muted,
-              volume: audioRef.current.volume,
-              trackEnabled: audioConsumer.track.enabled,
-            });
-          });
-      };
-      tryPlay();
-
-      console.log(
-        "[RemotePeer] Attached audio track, readyState:",
-        audioConsumer.track.readyState,
-        "muted:",
-        audioRef.current.muted,
-        "volume:",
-        audioRef.current.volume,
-        "paused:",
-        audioRef.current.paused,
-        "currentTime:",
-        audioRef.current.currentTime,
-        "trackEnabled:",
-        audioConsumer.track.enabled
-      );
-
-      // Monitor playback progress
-      const interval = setInterval(() => {
-        if (audioRef.current) {
-          console.log(
-            "[RemotePeer] Audio playback status, currentTime:",
-            audioRef.current.currentTime,
-            "paused:",
-            audioRef.current.paused,
-            "readyState:",
-            audioConsumer.track.readyState,
-            "deliveredFrames:",
-            audioConsumer.track.stats?.deliveredFrames || "N/A",
-            "trackEnabled:",
-            audioConsumer.track.enabled
-          );
-          if (audioRef.current.currentTime > 0) {
             console.log(
-              "[RemotePeer] Audio playing, currentTime:",
-              audioRef.current.currentTime
+              "[RemotePeer] Audio autoplay blocked, waiting for user interaction:",
+              e.message
             );
-            clearInterval(interval);
-          }
-        }
-      }, 1000);
-      return () => clearInterval(interval);
-    } else if (audioConsumer && !audioConsumer.track) {
-      console.log("[RemotePeer] Audio track not available for audioConsumer");
-    }
-  }, [videoConsumer, audioConsumer, userInteracted]);
+          });
+      }
+    }, [audioConsumer]);
 
-  // Detect user interaction
-  useEffect(() => {
-    const handleInteraction = () => {
-      if (!userInteracted) {
-        setUserInteracted(true);
+    // Setup video stream
+    useEffect(() => {
+      if (videoRef.current && videoConsumer && videoConsumer.track) {
+        const videoStream = new MediaStream([videoConsumer.track]);
+        videoRef.current.srcObject = videoStream;
+        videoRef.current
+          .play()
+          .catch((e) =>
+            console.error(`[RemotePeer] Video play error: ${e.message}`)
+          );
         console.log(
-          "[RemotePeer] User interaction detected, enabling audio playback"
+          "[RemotePeer] Attached video track, readyState:",
+          videoConsumer.track.readyState,
+          "enabled:",
+          videoConsumer.track.enabled
         );
-        if (
-          audioRef.current &&
-          audioRef.current.srcObject &&
-          !isPlaying &&
-          audioConsumer?.track?.enabled
-        ) {
-          audioRef.current
-            .play()
-            .then(() => {
-              console.log("[RemotePeer] Auto play succeeded after interaction");
-              setIsPlaying(true);
-            })
-            .catch((e) =>
-              console.error(
-                `[RemotePeer] Audio play error after interaction: ${e.message}`,
-                {
-                  error: e,
-                  readyState: audioRef.current.readyState,
-                  muted: audioRef.current.muted,
-                  volume: audioRef.current.volume,
-                  trackEnabled: audioConsumer?.track?.enabled,
-                }
-              )
-            );
+      }
+    }, [videoConsumer]);
+
+    // Handle manual audio play
+    const handleManualAudioPlay = async () => {
+      if (audioRef.current) {
+        try {
+          await audioRef.current.play();
+          setIsAudioPlaying(true);
+          setUserInteracted(true);
+          console.log("[RemotePeer] Audio started manually");
+        } catch (e) {
+          console.error("[RemotePeer] Manual audio play error:", e);
         }
       }
     };
-    document.addEventListener("click", handleInteraction);
-    return () => document.removeEventListener("click", handleInteraction);
-  }, [userInteracted, isPlaying, audioConsumer]);
 
-  return (
-    <div className="relative">
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        className="rounded-lg border shadow w-64 h-48 object-cover bg-black"
-      />
-      <audio ref={audioRef} autoPlay playsInline />
-      <button
-        onClick={handleManualPlay}
-        style={{
-          position: "absolute",
-          bottom: "10px",
-          left: "10px",
-          zIndex: 10,
-        }}
-        className="bg-blue-500 text-white px-2 py-1 rounded"
-        disabled={isPlaying}
-      >
-        {isPlaying ? "Playing" : "Play Audio"}
-      </button>
-    </div>
-  );
-});
+    // Detect user interaction for autoplay policy
+    useEffect(() => {
+      const handleInteraction = async () => {
+        if (!userInteracted && audioRef.current && !isAudioPlaying) {
+          try {
+            await audioRef.current.play();
+            setIsAudioPlaying(true);
+            setUserInteracted(true);
+            console.log("[RemotePeer] Audio started after user interaction");
+          } catch (e) {
+            console.log(
+              "[RemotePeer] Audio play failed after interaction:",
+              e.message
+            );
+          }
+        }
+      };
+
+      document.addEventListener("click", handleInteraction, { once: true });
+      document.addEventListener("touchstart", handleInteraction, {
+        once: true,
+      });
+
+      return () => {
+        document.removeEventListener("click", handleInteraction);
+        document.removeEventListener("touchstart", handleInteraction);
+      };
+    }, [userInteracted, isAudioPlaying]);
+
+    return (
+      <div className="relative group">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="rounded-2xl border-2 shadow w-full h-full object-cover bg-black"
+          style={{
+            aspectRatio: "16/9",
+            maxWidth: `${tileWidth}px`,
+            maxHeight: `${tileHeight}px`,
+          }}
+        />
+        <audio ref={audioRef} autoPlay style={{ display: "none" }} />
+        {audioConsumer && (
+          <div className="absolute top-2 right-2 bg-gray-800 text-white px-2 py-1 rounded text-xs">
+            {isAudioPlaying ? "🔊" : "🔇"}
+          </div>
+        )}
+      </div>
+    );
+  }
+);

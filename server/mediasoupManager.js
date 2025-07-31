@@ -1,4 +1,3 @@
-// mediasoupManager.js
 const mediasoup = require("mediasoup");
 
 const mediaCodecs = [
@@ -7,25 +6,40 @@ const mediaCodecs = [
     mimeType: "audio/opus",
     clockRate: 48000,
     channels: 2,
+    parameters: {
+      minptime: 10,
+      useinbandfec: 1,
+    },
   },
   {
     kind: "video",
     mimeType: "video/VP8",
     clockRate: 90000,
-    parameters: { "x-google-start-bitrate": 1000 },
+    parameters: {
+      "packetization-mode": 1,
+      "profile-level-id": "42e01f",
+      "level-asymmetry-allowed": 1,
+    },
   },
 ];
 
 async function createWorker() {
   return await mediasoup.createWorker({
-    logLevel: "debug", // Changed from "warn" to "debug" for detailed logs
+    logLevel: "debug",
     rtcMinPort: 10000,
     rtcMaxPort: 10100,
   });
 }
 
 async function createRouter(worker) {
-  return await worker.createRouter({ mediaCodecs });
+  try {
+    const router = await worker.createRouter({ mediaCodecs });
+    console.log("Router created with codecs:", mediaCodecs);
+    return router;
+  } catch (err) {
+    console.error("Error creating router:", err);
+    throw err;
+  }
 }
 
 module.exports = { createWorker, createRouter };

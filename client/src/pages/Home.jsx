@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import socket from "../socket";
+import { MdOutlineVideoCall } from "react-icons/md";
+
 
 function HomePage() {
   const [roomId, setRoomId] = useState("");
@@ -17,11 +19,12 @@ function HomePage() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gray-100">
+    <div className="flex flex-col items-center justify-center h-screen">
       <button
         onClick={createRoom}
-        className="mb-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        className="flex flex-row items-center justify-center gap-2 mb-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer"
       >
+        <MdOutlineVideoCall className="size-5"/>
         New Meeting
       </button>
       <div className="flex">
@@ -34,7 +37,7 @@ function HomePage() {
         />
         <button
           onClick={joinRoom}
-          className="ml-2 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+          className="ml-2 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 cursor-pointer"
         >
           Join Meeting
         </button>
