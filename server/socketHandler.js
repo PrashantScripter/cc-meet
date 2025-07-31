@@ -64,9 +64,9 @@ module.exports = (socket, worker, io) => {
               announcedIp: process.env.PUBLIC_IP, // e.g. your-render-app.onrender.com
             },
           ],
-          enableUdp: true,
-          enableTcp: true,
-          preferUdp: true,
+          enableUdp: false,
+          enableTcp: false,
+          preferUdp: false,
           initialAvailableOutgoingBitrate: 1000000,
           iceServers: [
             // public STUN
@@ -74,17 +74,12 @@ module.exports = (socket, worker, io) => {
 
             // TURN “suite”: UDP, TCP fallback, then TLS on 5349
             {
-              urls: [
-                "turn:turn.yourdomain.com:3478?transport=udp", // UDP first
-                "turn:turn.yourdomain.com:3478?transport=tcp", // TCP fallback
-                "turns:turn.yourdomain.com:5349?transport=tcp", // TURN-over-TLS
-              ],
+              urls: ["turns:turn.yourdomain.com:5349?transport=tcp"],
               username: process.env.TURN_USER,
               credential: process.env.TURN_PASS,
             },
           ],
         });
-
 
         transport.on("icestatechange", (s) =>
           console.log("ICE state", s, "for", transport.id)
