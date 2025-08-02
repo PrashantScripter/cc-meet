@@ -38,24 +38,28 @@ export default React.memo(function MeetingRoom() {
 
     // Your ExpressTurn TURN server with TCP (primary for Render)
     {
-      urls: "relay1.expressturn.com:3480",
-      username: "000000002069488552",
-      credential: "2PSuYeuDpijaviROz/V9hmVubFw=",
+      urls: "stun:stun.relay.metered.ca:80",
     },
-
-    // Your ExpressTurn TURN server with UDP (fallback)
-    // {
-    //   urls: "turn:relay1.expressturn.com:3478?transport=udp",
-    //   username: "000000002069484607",
-    //   credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
-    // },
-
-    // // Alternative port for better connectivity
-    // {
-    //   urls: "turn:relay1.expressturn.com:3480?transport=tcp",
-    //   username: "000000002069484607",
-    //   credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
-    // },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "727a731e43c5a2aae3098e25",
+      credential: "ZWAt6A0Crs2aFYcd",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "727a731e43c5a2aae3098e25",
+      credential: "ZWAt6A0Crs2aFYcd",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "727a731e43c5a2aae3098e25",
+      credential: "ZWAt6A0Crs2aFYcd",
+    },
+    {
+      urls: "turns:global.relay.metered.ca:443?transport=tcp",
+      username: "727a731e43c5a2aae3098e25",
+      credential: "ZWAt6A0Crs2aFYcd",
+    },
   ];
 
   useEffect(() => {
