@@ -38,24 +38,24 @@ export default React.memo(function MeetingRoom() {
 
     // Your ExpressTurn TURN server with TCP (primary for Render)
     {
-      urls: "turn:relay1.expressturn.com:3478?transport=tcp",
-      username: "000000002069484607",
-      credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
+      urls: "relay1.expressturn.com:3480",
+      username: "000000002069488552",
+      credential: "2PSuYeuDpijaviROz/V9hmVubFw=",
     },
 
     // Your ExpressTurn TURN server with UDP (fallback)
-    {
-      urls: "turn:relay1.expressturn.com:3478?transport=udp",
-      username: "000000002069484607",
-      credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
-    },
+    // {
+    //   urls: "turn:relay1.expressturn.com:3478?transport=udp",
+    //   username: "000000002069484607",
+    //   credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
+    // },
 
-    // Alternative port for better connectivity
-    {
-      urls: "turn:relay1.expressturn.com:3480?transport=tcp",
-      username: "000000002069484607",
-      credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
-    },
+    // // Alternative port for better connectivity
+    // {
+    //   urls: "turn:relay1.expressturn.com:3480?transport=tcp",
+    //   username: "000000002069484607",
+    //   credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
+    // },
   ];
 
   useEffect(() => {
