@@ -30,6 +30,34 @@ export default React.memo(function MeetingRoom() {
   const initializedRef = useRef(false);
   const pendingRef = useRef([]);
 
+  // ICE servers configuration with your ExpressTurn TURN server
+  const iceServers = [
+    // STUN servers for initial connectivity
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+
+    // Your ExpressTurn TURN server with TCP (primary for Render)
+    {
+      urls: "turn:relay1.expressturn.com:3478?transport=tcp",
+      username: "000000002069484607",
+      credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
+    },
+
+    // Your ExpressTurn TURN server with UDP (fallback)
+    {
+      urls: "turn:relay1.expressturn.com:3478?transport=udp",
+      username: "000000002069484607",
+      credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
+    },
+
+    // Alternative port for better connectivity
+    {
+      urls: "turn:relay1.expressturn.com:3480?transport=tcp",
+      username: "000000002069484607",
+      credential: "GDumVjUHM1A53mLt9NWhnnaah/s=",
+    },
+  ];
+
   useEffect(() => {
     const updateId = () => setMySocketId(socket.id);
     socket.on("connect", updateId);
@@ -234,6 +262,7 @@ export default React.memo(function MeetingRoom() {
         if (!initializedRef.current) {
           initializedRef.current = true;
 
+          // Create send transport with TURN server configuration
           socket.emit(
             "createWebRtcTransport",
             { roomId, direction: "send" },
@@ -246,40 +275,76 @@ export default React.memo(function MeetingRoom() {
                 return;
               }
 
+              console.log(
+                "[initializeRoom] Creating send transport with TURN servers"
+              );
+
               const transport = _device.createSendTransport({
                 ...params,
-                iceServers: [
-                  { urls: "stun:stun.l.google.com:19302" },
-                  { urls: "stun:stun1.l.google.com:19302" },
-                  // Add Twilio free TURN server (replace with your credentials)
-                  {
-                    urls: "turn:global.turn.twilio.com:3478?transport=tcp",
-                    username: "your-twilio-turn-username",
-                    credential: "your-twilio-turn-password",
-                  },
-                ],
-                iceTransportPolicy: "all", // Allow TCP (Render blocks UDP)
+                iceServers,
+                iceTransportPolicy: "all", // Allow both UDP and TCP
+                iceCandidatePoolSize: 10, // Increase candidate pool for better connectivity
+                bundlePolicy: "balanced",
+                rtcpMuxPolicy: "require",
               });
-              transport.on("connect", ({ dtlsParameters }, cb) =>
+
+              // Enhanced connection event logging
+              transport.on("connect", ({ dtlsParameters }, cb) => {
+                console.log("[sendTransport] Connecting...");
                 socket.emit(
                   "connectWebRtcTransport",
                   { roomId, transportId: params.id, dtlsParameters },
-                  cb
-                )
-              );
-              transport.on("produce", ({ kind, rtpParameters }, cb) =>
+                  (result) => {
+                    console.log("[sendTransport] Connect result:", result);
+                    cb(result);
+                  }
+                );
+              });
+
+              transport.on("produce", ({ kind, rtpParameters }, cb) => {
+                console.log(`[sendTransport] Producing ${kind}`);
                 socket.emit(
                   "produce",
                   { roomId, transportId: params.id, kind, rtpParameters },
-                  ({ id }) => cb({ id })
-                )
-              );
+                  ({ id, error }) => {
+                    if (error) {
+                      console.error(
+                        `[sendTransport] Produce error for ${kind}:`,
+                        error
+                      );
+                    } else {
+                      console.log(
+                        `[sendTransport] Produced ${kind} with id:`,
+                        id
+                      );
+                    }
+                    cb({ id });
+                  }
+                );
+              });
+
+              // Additional transport event listeners for debugging
+              transport.on("connectionstatechange", (state) => {
+                console.log("[sendTransport] Connection state:", state);
+              });
+
+              transport.on("icegatheringstatechange", (state) => {
+                console.log("[sendTransport] ICE gathering state:", state);
+              });
+
+              transport.on("iceconnectionstatechange", (state) => {
+                console.log("[sendTransport] ICE connection state:", state);
+              });
+
               sendTransportRef.current = transport;
               setSendTransport(transport);
-              console.log("[initializeRoom] Send transport created");
+              console.log(
+                "[initializeRoom] Send transport created with TURN support"
+              );
             }
           );
 
+          // Create receive transport with TURN server configuration
           socket.emit(
             "createWebRtcTransport",
             { roomId, direction: "recv" },
@@ -292,29 +357,49 @@ export default React.memo(function MeetingRoom() {
                 return;
               }
 
+              console.log(
+                "[initializeRoom] Creating recv transport with TURN servers"
+              );
+
               const transport = _device.createRecvTransport({
                 ...params,
-                iceServers: [
-                  { urls: "stun:stun.l.google.com:19302" },
-                  { urls: "stun:stun1.l.google.com:19302" },
-                  {
-                    urls: "turn:global.turn.twilio.com:3478?transport=tcp",
-                    username: "your-twilio-turn-username",
-                    credential: "your-twilio-turn-password",
-                  },
-                ],
-                iceTransportPolicy: "all",
+                iceServers,
+                iceTransportPolicy: "all", // Allow both UDP and TCP
+                iceCandidatePoolSize: 10, // Increase candidate pool for better connectivity
+                bundlePolicy: "balanced",
+                rtcpMuxPolicy: "require",
               });
-              transport.on("connect", ({ dtlsParameters }, cb) =>
+
+              transport.on("connect", ({ dtlsParameters }, cb) => {
+                console.log("[recvTransport] Connecting...");
                 socket.emit(
                   "connectWebRtcTransport",
                   { roomId, transportId: params.id, dtlsParameters },
-                  cb
-                )
-              );
+                  (result) => {
+                    console.log("[recvTransport] Connect result:", result);
+                    cb(result);
+                  }
+                );
+              });
+
+              // Additional transport event listeners for debugging
+              transport.on("connectionstatechange", (state) => {
+                console.log("[recvTransport] Connection state:", state);
+              });
+
+              transport.on("icegatheringstatechange", (state) => {
+                console.log("[recvTransport] ICE gathering state:", state);
+              });
+
+              transport.on("iceconnectionstatechange", (state) => {
+                console.log("[recvTransport] ICE connection state:", state);
+              });
+
               recvTransportRef.current = transport;
               setRecvTransport(transport);
-              console.log("[initializeRoom] Recv transport created");
+              console.log(
+                "[initializeRoom] Recv transport created with TURN support"
+              );
 
               setTimeout(() => consumePending(), 500);
             }
